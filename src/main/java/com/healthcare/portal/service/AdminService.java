@@ -155,7 +155,10 @@ public class AdminService {
     
     @Transactional
     public void updateListing(Long id, ListingDTO.ListingRequest request) {
-        listingService.updateListing(id, request);
+        // Fetch listing to get the owner's userId, required for ListingService.updateListing(Long, Request, Long)
+        Listing listing = listingRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Listing not found with id: " + id));
+        listingService.updateListing(id, request, listing.getUser().getId());
     }
     
     @Transactional
