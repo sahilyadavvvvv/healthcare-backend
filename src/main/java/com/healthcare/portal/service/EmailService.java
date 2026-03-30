@@ -215,6 +215,7 @@ public class EmailService {
             log.info("Email sent successfully to: {}", to);
         } catch (Exception e) {
             log.error("Failed to send email to: {} — Error: {}", to, e.getMessage());
+            throw new RuntimeException("Failed to send email. Please verify SMTP configuration: " + e.getMessage());
         }
     }
 }
