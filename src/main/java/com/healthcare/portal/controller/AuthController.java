@@ -7,6 +7,8 @@ import com.healthcare.portal.service.EmailService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,6 +20,8 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/auth")
 @Tag(name = "Authentication", description = "Authentication management APIs")
 public class AuthController {
+    
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
     
     private final AuthService authService;
     private final EmailService emailService;
@@ -39,8 +43,17 @@ public class AuthController {
     @Operation(summary = "Send OTP for registration", description = "Generates and sends a 6-digit OTP to the specified email")
     public ResponseEntity<ApiResponse<Void>> sendOtp(
             @Valid @RequestBody AuthDTO.SendOtpRequest request) {
-        authService.sendRegistrationOtp(request.getEmail());
-        return ResponseEntity.ok(ApiResponse.success("Verification code sent to your email", null));
+        log.info("=== /send-otp endpoint called for email: {} ===", request.getEmail());
+        try {
+            authService.sendRegistrationOtp(request.getEmail());
+            log.info("=== /send-otp SUCCESS for email: {} ===", request.getEmail());
+            return ResponseEntity.ok(ApiResponse.success("Verification code sent to your email", null));
+        } catch (Exception e) {
+            log.error("=== /send-otp FAILED for email: {} | Error: {} ===", request.getEmail(), e.getMessage(), e);
+            // Return a proper error response instead of a generic 500
+            return ResponseEntity.internalServerError()
+                .body(ApiResponse.<Void>error("Failed to send verification code. Please try again later. Error: " + e.getMessage()));
+        }
     }
 
     @PostMapping("/verify-otp-register")
@@ -95,5 +108,12 @@ public class AuthController {
     public ResponseEntity<ApiResponse<String>> checkSmtp() {
         String diagnostics = emailService.getSmtpDiagnostics();
         return ResponseEntity.ok(ApiResponse.success("SMTP Config", diagnostics));
+    }
+
+    @GetMapping("/smtp-test")
+    @Operation(summary = "Test SMTP connection", description = "Tests live SMTP connectivity (no auth required)")
+    public ResponseEntity<ApiResponse<String>> testSmtp() {
+        String result = emailService.testSmtpConnection();
+        return ResponseEntity.ok(ApiResponse.success("SMTP Test", result));
     }
 }

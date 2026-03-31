@@ -2,16 +2,21 @@ package com.healthcare.portal.service;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
 import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Properties;
+
 /**
  * Service for sending email notifications.
- * All methods are @Async so they run in a background thread.
+ * OTP/password-reset emails are sent SYNCHRONOUSLY so failures propagate to the caller.
+ * Welcome/notification emails are @Async so they don't block the response.
  */
 @Service
 public class EmailService {
@@ -29,23 +34,112 @@ public class EmailService {
     @Value("${spring.mail.port}")
     private String mailPort;
 
+    @Value("${spring.mail.password}")
+    private String mailPassword;
+
     public EmailService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
+    }
+
+    /**
+     * Runs after dependency injection to verify and fix SMTP configuration.
+     * This ensures the JavaMailSender has the correct credentials at runtime,
+     * especially important when environment variables override application.properties.
+     */
+    @PostConstruct
+    public void initMailSender() {
+        log.info("========== EMAIL SERVICE INITIALIZATION ==========");
+        log.info("Mail Host: {}", mailHost);
+        log.info("Mail Port: {}", mailPort);
+        log.info("Mail Username: {}", fromEmail);
+        
+        // Mask password for logging (show first 4 chars only)
+        String maskedPw = mailPassword != null && mailPassword.length() > 4 
+            ? mailPassword.substring(0, 4) + "****" : "NOT_SET";
+        log.info("Mail Password (masked): {}", maskedPw);
+        log.info("Mail Password length: {}", mailPassword != null ? mailPassword.length() : 0);
+
+        // If the auto-configured sender is a JavaMailSenderImpl, force-apply the
+        // resolved properties so that env-var overrides actually take effect.
+        if (mailSender instanceof JavaMailSenderImpl impl) {
+            impl.setHost(mailHost);
+            impl.setPort(Integer.parseInt(mailPort));
+            impl.setUsername(fromEmail);
+            
+            // Strip any stray spaces from the password (Gmail app passwords are
+            // displayed with spaces for readability, e.g. "abcd efgh ijkl mnop",
+            // but the actual password is "abcdefghijklmnop").
+            String cleanPassword = mailPassword != null ? mailPassword.replaceAll("\\s+", "") : mailPassword;
+            impl.setPassword(cleanPassword);
+            
+            log.info("Password cleaned: original length={}, cleaned length={}", 
+                     mailPassword != null ? mailPassword.length() : 0,
+                     cleanPassword != null ? cleanPassword.length() : 0);
+
+            Properties props = impl.getJavaMailProperties();
+            props.put("mail.smtp.auth", "true");
+            props.put("mail.smtp.starttls.enable", "true");
+            props.put("mail.smtp.connectiontimeout", "15000");
+            props.put("mail.smtp.timeout", "15000");
+            props.put("mail.smtp.writetimeout", "15000");
+            // Enable debug output for SMTP session
+            props.put("mail.debug", "true");
+            
+            log.info("✅ JavaMailSenderImpl reconfigured successfully");
+            log.info("   Final host={}, port={}, username={}", 
+                     impl.getHost(), impl.getPort(), impl.getUsername());
+        } else {
+            log.warn("⚠️ mailSender is NOT JavaMailSenderImpl — type: {}. Cannot force-reconfigure.",
+                     mailSender.getClass().getName());
+        }
+        log.info("========== EMAIL SERVICE INITIALIZATION COMPLETE ==========");
     }
 
     /**
      * Diagnostic method to verify SMTP configuration at runtime.
      */
     public String getSmtpDiagnostics() {
-        // Mask password for security but show enough to verify it's loaded
         String maskedFrom = fromEmail != null && fromEmail.length() > 4 
             ? fromEmail.substring(0, 4) + "****" + fromEmail.substring(fromEmail.indexOf("@")) 
             : "NOT_SET";
-        return String.format("SMTP Config -> host=%s, port=%s, from=%s, sender_class=%s",
-                mailHost, mailPort, maskedFrom, mailSender.getClass().getSimpleName());
+        
+        String pwInfo = "NOT_SET";
+        if (mailPassword != null) {
+            String cleaned = mailPassword.replaceAll("\\s+", "");
+            pwInfo = String.format("length=%d, cleaned_length=%d", mailPassword.length(), cleaned.length());
+        }
+
+        String senderInfo = "unknown";
+        if (mailSender instanceof JavaMailSenderImpl impl) {
+            senderInfo = String.format("host=%s, port=%d, username=%s", 
+                impl.getHost(), impl.getPort(), impl.getUsername());
+        }
+        
+        return String.format(
+            "SMTP Config -> host=%s, port=%s, from=%s, password=%s, sender=[%s], sender_class=%s",
+            mailHost, mailPort, maskedFrom, pwInfo, senderInfo, mailSender.getClass().getSimpleName());
     }
 
-    // ========== 1. Welcome Email on Sign-Up ==========
+    /**
+     * Test SMTP connectivity by sending a test email to the sender's own address.
+     * Returns a diagnostic string.
+     */
+    public String testSmtpConnection() {
+        try {
+            log.info("Testing SMTP connection...");
+            if (mailSender instanceof JavaMailSenderImpl impl) {
+                impl.testConnection();
+                log.info("✅ SMTP connection test PASSED");
+                return "SMTP connection test PASSED. Server is reachable and credentials are valid.";
+            }
+            return "Cannot test: mailSender is not JavaMailSenderImpl";
+        } catch (Exception e) {
+            log.error("❌ SMTP connection test FAILED: {}", e.getMessage(), e);
+            return "SMTP connection test FAILED: " + e.getMessage();
+        }
+    }
+
+    // ========== 1. Welcome Email on Sign-Up (Async - fire & forget) ==========
     @Async
     public void sendWelcomeEmail(String toEmail, String fullName) {
         String subject = "Welcome to MedBiz Marketplace!";
@@ -72,10 +166,15 @@ public class EmailService {
             + "<p style='color:#9ca3af;font-size:12px;margin:0;'>© 2026 MedBiz Marketplace. All rights reserved.</p>"
             + "</div></div></body></html>";
 
-        sendHtmlEmail(toEmail, subject, body);
+        try {
+            sendHtmlEmail(toEmail, subject, body);
+        } catch (Exception e) {
+            // Async method - log error but don't propagate (welcome email is non-critical)
+            log.error("❌ Failed to send welcome email to {} (non-critical, will not block registration)", toEmail, e);
+        }
     }
 
-    // ========== 2. Buyer Verified / Approved Email ==========
+    // ========== 2. Buyer Verified / Approved Email (Async) ==========
     @Async
     public void sendBuyerApprovedEmail(String toEmail, String fullName) {
         String subject = "Your Buyer Verification is Approved — MedBiz";
@@ -101,10 +200,14 @@ public class EmailService {
             + "<p style='color:#9ca3af;font-size:12px;margin:0;'>© 2026 MedBiz Marketplace. All rights reserved.</p>"
             + "</div></div></body></html>";
 
-        sendHtmlEmail(toEmail, subject, body);
+        try {
+            sendHtmlEmail(toEmail, subject, body);
+        } catch (Exception e) {
+            log.error("❌ Failed to send buyer approved email to {} (non-critical)", toEmail, e);
+        }
     }
 
-    // ========== 3. Inquiry Notification to Seller ==========
+    // ========== 3. Inquiry Notification to Seller (Async) ==========
     @Async
     public void sendInquiryNotificationToSeller(String sellerEmail, String sellerName,
             String buyerName, String buyerEmail, String buyerPhone, String message, String listingTitle) {
@@ -135,10 +238,14 @@ public class EmailService {
             + "<p style='color:#9ca3af;font-size:12px;margin:0;'>© 2026 MedBiz Marketplace. All rights reserved.</p>"
             + "</div></div></body></html>";
 
-        sendHtmlEmail(sellerEmail, subject, body);
+        try {
+            sendHtmlEmail(sellerEmail, subject, body);
+        } catch (Exception e) {
+            log.error("❌ Failed to send inquiry notification to {} (non-critical)", sellerEmail, e);
+        }
     }
 
-    // ========== 4. Job Application Notification to Employer ==========
+    // ========== 4. Job Application Notification to Employer (Async) ==========
     @Async
     public void sendJobApplicationNotification(String employerEmail, String employerName,
             String seekerName, String seekerEmail, String jobTitle) {
@@ -166,10 +273,14 @@ public class EmailService {
             + "<p style='color:#9ca3af;font-size:12px;margin:0;'>© 2026 MedBiz Marketplace. All rights reserved.</p>"
             + "</div></div></body></html>";
 
-        sendHtmlEmail(employerEmail, subject, body);
+        try {
+            sendHtmlEmail(employerEmail, subject, body);
+        } catch (Exception e) {
+            log.error("❌ Failed to send job application notification to {} (non-critical)", employerEmail, e);
+        }
     }
 
-    // ========== 5. OTP Verification Email ==========
+    // ========== 5. OTP Verification Email (SYNCHRONOUS — must propagate errors) ==========
     public void sendOtpEmail(String toEmail, String otp) {
         log.info("=== SENDING OTP EMAIL === to: {}, otp: {}", toEmail, otp);
         log.info("SMTP diagnostics: {}", getSmtpDiagnostics());
@@ -192,16 +303,16 @@ public class EmailService {
             + "<p style='color:#9ca3af;font-size:12px;margin:0;'>© 2026 MedBiz Marketplace. All rights reserved.</p>"
             + "</div></div></body></html>";
 
+        // This is SYNCHRONOUS — exception will propagate to the controller
         sendHtmlEmail(toEmail, subject, body);
         log.info("=== OTP EMAIL SENT SUCCESSFULLY === to: {}", toEmail);
     }
 
     /**
-     * Send password reset email with verification link
+     * Send password reset email (SYNCHRONOUS — must propagate errors)
      */
     public void sendForgotPasswordEmail(String toEmail, String otp) {
         log.info("=== SENDING FORGOT PASSWORD EMAIL === to: {}", toEmail);
-        String resetUrl = "https://medbiz.in/reset-password?email=" + toEmail + "&otp=" + otp;
         String subject = "Reset Your Password - MedBiz";
         String body = "<!DOCTYPE html><html><body style='font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f4;'>"
             + "<div style='max-width:600px;margin:30px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
@@ -222,6 +333,7 @@ public class EmailService {
             + "</div></div></body></html>";
 
         sendHtmlEmail(toEmail, subject, body);
+        log.info("=== FORGOT PASSWORD EMAIL SENT SUCCESSFULLY === to: {}", toEmail);
     }
 
     // ========== Helper ==========
