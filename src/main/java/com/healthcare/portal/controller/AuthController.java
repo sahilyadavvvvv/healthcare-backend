@@ -3,6 +3,7 @@ package com.healthcare.portal.controller;
 import com.healthcare.portal.dto.*;
 import com.healthcare.portal.entity.User;
 import com.healthcare.portal.service.AuthService;
+import com.healthcare.portal.service.EmailService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -19,9 +20,11 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
     
     private final AuthService authService;
+    private final EmailService emailService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, EmailService emailService) {
         this.authService = authService;
+        this.emailService = emailService;
     }
     
     @PostMapping("/register")
@@ -85,5 +88,12 @@ public class AuthController {
     public ResponseEntity<ApiResponse<UserDTO.UserResponse>> getCurrentUser() {
         UserDTO.UserResponse userResponse = authService.getCurrentUserResponse();
         return ResponseEntity.ok(ApiResponse.success("Profile retrieved successfully", userResponse));
+    }
+    
+    @GetMapping("/smtp-check")
+    @Operation(summary = "Check SMTP config", description = "Returns SMTP diagnostics (no auth required)")
+    public ResponseEntity<ApiResponse<String>> checkSmtp() {
+        String diagnostics = emailService.getSmtpDiagnostics();
+        return ResponseEntity.ok(ApiResponse.success("SMTP Config", diagnostics));
     }
 }

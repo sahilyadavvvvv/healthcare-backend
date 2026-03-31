@@ -23,8 +23,26 @@ public class EmailService {
     @Value("${spring.mail.username}")
     private String fromEmail;
 
+    @Value("${spring.mail.host}")
+    private String mailHost;
+
+    @Value("${spring.mail.port}")
+    private String mailPort;
+
     public EmailService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
+    }
+
+    /**
+     * Diagnostic method to verify SMTP configuration at runtime.
+     */
+    public String getSmtpDiagnostics() {
+        // Mask password for security but show enough to verify it's loaded
+        String maskedFrom = fromEmail != null && fromEmail.length() > 4 
+            ? fromEmail.substring(0, 4) + "****" + fromEmail.substring(fromEmail.indexOf("@")) 
+            : "NOT_SET";
+        return String.format("SMTP Config -> host=%s, port=%s, from=%s, sender_class=%s",
+                mailHost, mailPort, maskedFrom, mailSender.getClass().getSimpleName());
     }
 
     // ========== 1. Welcome Email on Sign-Up ==========
@@ -46,7 +64,7 @@ public class EmailService {
             + "<li>Connect with verified buyers and sellers</li>"
             + "</ul>"
             + "<div style='text-align:center;margin:30px 0;'>"
-            + "<a href='http://localhost:3000/dashboard' style='background:#0d9488;color:#fff;padding:14px 30px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold;'>Go to Dashboard</a>"
+            + "<a href='https://medbiz.in/dashboard' style='background:#0d9488;color:#fff;padding:14px 30px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold;'>Go to Dashboard</a>"
             + "</div>"
             + "<p style='color:#999;font-size:13px;'>If you did not create this account, please ignore this email.</p>"
             + "</div>"
@@ -76,7 +94,7 @@ public class EmailService {
             + "<li>Priority access to premium listings</li>"
             + "</ul>"
             + "<div style='text-align:center;margin:30px 0;'>"
-            + "<a href='http://localhost:3000/listings' style='background:#059669;color:#fff;padding:14px 30px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold;'>Browse Listings</a>"
+            + "<a href='https://medbiz.in/listings' style='background:#059669;color:#fff;padding:14px 30px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold;'>Browse Listings</a>"
             + "</div>"
             + "</div>"
             + "<div style='background:#f9fafb;padding:15px;text-align:center;border-top:1px solid #e5e7eb;'>"
@@ -110,7 +128,7 @@ public class EmailService {
             + "<p style='color:#555;font-size:15px;line-height:1.6;background:#fff;padding:12px;border-radius:6px;border:1px solid #e0f2fe;'>" + message + "</p>"
             + "</div>"
             + "<div style='text-align:center;margin:25px 0;'>"
-            + "<a href='http://localhost:3000/dashboard/inquiries' style='background:#2563eb;color:#fff;padding:14px 30px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold;'>View Inquiries</a>"
+            + "<a href='https://medbiz.in/dashboard/inquiries' style='background:#2563eb;color:#fff;padding:14px 30px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold;'>View Inquiries</a>"
             + "</div>"
             + "</div>"
             + "<div style='background:#f9fafb;padding:15px;text-align:center;border-top:1px solid #e5e7eb;'>"
@@ -141,7 +159,7 @@ public class EmailService {
             + "</table>"
             + "</div>"
             + "<div style='text-align:center;margin:25px 0;'>"
-            + "<a href='http://localhost:3000/dashboard/applications' style='background:#7c3aed;color:#fff;padding:14px 30px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold;'>View Applications</a>"
+            + "<a href='https://medbiz.in/dashboard/applications' style='background:#7c3aed;color:#fff;padding:14px 30px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold;'>View Applications</a>"
             + "</div>"
             + "</div>"
             + "<div style='background:#f9fafb;padding:15px;text-align:center;border-top:1px solid #e5e7eb;'>"
@@ -153,6 +171,9 @@ public class EmailService {
 
     // ========== 5. OTP Verification Email ==========
     public void sendOtpEmail(String toEmail, String otp) {
+        log.info("=== SENDING OTP EMAIL === to: {}, otp: {}", toEmail, otp);
+        log.info("SMTP diagnostics: {}", getSmtpDiagnostics());
+        
         String subject = "Your MedBiz Verification Code: " + otp;
         String body = "<!DOCTYPE html><html><body style='font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f4;'>"
             + "<div style='max-width:600px;margin:30px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
@@ -172,13 +193,15 @@ public class EmailService {
             + "</div></div></body></html>";
 
         sendHtmlEmail(toEmail, subject, body);
+        log.info("=== OTP EMAIL SENT SUCCESSFULLY === to: {}", toEmail);
     }
 
     /**
      * Send password reset email with verification link
      */
     public void sendForgotPasswordEmail(String toEmail, String otp) {
-        String resetUrl = "http://localhost:3000/reset-password?email=" + toEmail + "&otp=" + otp;
+        log.info("=== SENDING FORGOT PASSWORD EMAIL === to: {}", toEmail);
+        String resetUrl = "https://medbiz.in/reset-password?email=" + toEmail + "&otp=" + otp;
         String subject = "Reset Your Password - MedBiz";
         String body = "<!DOCTYPE html><html><body style='font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f4;'>"
             + "<div style='max-width:600px;margin:30px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
@@ -187,12 +210,11 @@ public class EmailService {
             + "</div>"
             + "<div style='padding:40px;text-align:center;'>"
             + "<p style='color:#374151;font-size:18px;font-weight:600;'>Hello,</p>"
-            + "<p style='color:#4b5563;font-size:16px;line-height:1.6;'>We received a request to reset your password for your MedBiz account. Click the button below to verify your identity and set a new password:</p>"
-            + "<div style='margin:35px 0;'>"
-            + "<a href='" + resetUrl + "' style='background-color:#4f46e5;color:#ffffff;padding:14px 30px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;display:inline-block;box-shadow:0 4px 6px rgba(79,70,229,0.2);'>Verify & Reset Password</a>"
+            + "<p style='color:#4b5563;font-size:16px;line-height:1.6;'>We received a request to reset your password for your MedBiz account. Your verification code is:</p>"
+            + "<div style='background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:2px dashed #6366f1;border-radius:12px;padding:25px;margin:25px auto;max-width:280px;'>"
+            + "<p style='font-size:40px;font-weight:bold;color:#4f46e5;letter-spacing:12px;margin:0;font-family:monospace;'>" + otp + "</p>"
             + "</div>"
-            + "<p style='color:#9ca3af;font-size:14px;'>If the button doesn't work, copy and paste this link into your browser:</p>"
-            + "<p style='color:#4f46e5;font-size:14px;word-break:break-all;'>" + resetUrl + "</p>"
+            + "<p style='color:#9ca3af;font-size:14px;'>This code expires in <strong>5 minutes</strong>.</p>"
             + "<p style='color:#ef4444;font-size:14px;margin-top:25px;border-top:1px solid #f3f4f6;padding-top:20px;'>If you did not request a password reset, please ignore this email.</p>"
             + "</div>"
             + "<div style='background:#f9fafb;padding:20px;text-align:center;border-top:1px solid #e5e7eb;'>"
@@ -205,6 +227,9 @@ public class EmailService {
     // ========== Helper ==========
     private void sendHtmlEmail(String to, String subject, String htmlBody) {
         try {
+            log.info("Attempting to send email to: {} | Subject: {} | From: {} | Host: {}:{}", 
+                     to, subject, fromEmail, mailHost, mailPort);
+            
             MimeMessage mimeMessage = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
             helper.setFrom(fromEmail);
@@ -212,10 +237,11 @@ public class EmailService {
             helper.setSubject(subject);
             helper.setText(htmlBody, true);
             mailSender.send(mimeMessage);
-            log.info("Email sent successfully to: {}", to);
+            log.info("✅ Email sent successfully to: {} | Subject: {}", to, subject);
         } catch (Exception e) {
-            log.error("Failed to send email to: {} — Error: {}", to, e.getMessage());
-            throw new RuntimeException("Failed to send email. Please verify SMTP configuration: " + e.getMessage());
+            log.error("❌ FAILED to send email to: {} | Subject: {} | Error: {}", to, subject, e.getMessage());
+            log.error("❌ Full stack trace:", e);
+            throw new RuntimeException("Failed to send email to " + to + ". SMTP Error: " + e.getMessage(), e);
         }
     }
 }
